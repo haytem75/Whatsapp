@@ -5,8 +5,9 @@
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-trixie",
 	"features": {
+		"ghcr.io/devcontainers/features/node:1": {},
 		"ghcr.io/devcontainer-config/features/dot-config:4": {}
-	}
+	},
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
@@ -15,7 +16,7 @@
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "pip3 install --user -r requirements.txt",
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y chromium && pip3 install --user -r requirements.txt"
 
 	// Configure tool-specific properties.
 	// "customizations": {},
