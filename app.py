@@ -73,6 +73,27 @@ class WhatsAppReader:
         'span[dir="auto"]',
     )
 
+# ── SETUP ──────────────────────────────────────────────────────────────────
+    # Sets up the WhatsApp reader — opens Chrome with a saved session so you don't have to scan the QR code every single time.
+    def __init__(self):
+        options = webdriver.ChromeOptions()
+        options.binary_location = self._resolve_browser_binary()
+
+        # Save the login session to a local folder.
+        # This means you only need to scan the QR code once — future runs skip it.
+        options.add_argument(f"--user-data-dir={CHROME_SESSION_DIR}")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+
+        # Let Selenium resolve a compatible driver for the installed browser.
+        self.driver = webdriver.Chrome(options=options)
+
+        # Default wait time for elements to appear (in seconds)
+        self.wait = WebDriverWait(self.driver, DEFAULT_WAIT_TIMEOUT)
+
+    # Looks through a list of page elements and returns the first one that is actually visible on screen.
+
+    # [sub of SETUP] Figures out where Chrome (or Chromium) is installed on your computer so we can open it.
     def _resolve_browser_binary(self) -> str:
         """Return a Chrome-compatible browser binary path or raise a setup error."""
         if CHROME_BINARY_PATH:
@@ -140,117 +161,10 @@ class WhatsAppReader:
         )
 
     # ── Initialization ─────────────────────────────────────────────────────────
-    def __init__(self):
-        options = webdriver.ChromeOptions()
-        options.binary_location = self._resolve_browser_binary()
-
-        # Save the login session to a local folder.
-        # This means you only need to scan the QR code once — future runs skip it.
-        options.add_argument(f"--user-data-dir={CHROME_SESSION_DIR}")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-
-        # Let Selenium resolve a compatible driver for the installed browser.
-        self.driver = webdriver.Chrome(options=options)
-
-        # Default wait time for elements to appear (in seconds)
-        self.wait = WebDriverWait(self.driver, DEFAULT_WAIT_TIMEOUT)
-
-    def _find_first_visible(self, selectors: Sequence[str]):
-        """Return the first visible element that matches any selector."""
-        for selector in selectors:
-            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-            for element in elements:
-                if element.is_displayed():
-                    return element
-        return None
-
-    def _wait_for_any_visible(self, selectors: Sequence[str], timeout: Optional[int] = None):
-        """Wait until any selector resolves to a visible element."""
-        wait = WebDriverWait(self.driver, timeout or DEFAULT_WAIT_TIMEOUT)
-        return wait.until(lambda driver: self._find_first_visible(selectors))
-
-    def _replace_search_text(self, element, value: str):
-        """Replace any existing search text in the active WhatsApp search box."""
-        element.send_keys(Keys.CONTROL, "a")
-        element.send_keys(Keys.DELETE)
-        element.send_keys(value)
-
-    def _find_chat_result(self, group_name: str):
-        """Return the first clickable chat result that matches the group name."""
-        result_xpaths = (
-            f'//span[@title="{group_name}"]',
-            f'//*[@title="{group_name}"]',
-            f'//span[normalize-space()="{group_name}"]',
-            f'//*[@aria-label="{group_name}"]',
-        )
-
-        for xpath in result_xpaths:
-            matches = self.driver.find_elements(By.XPATH, xpath)
-            for match in matches:
-                if match.is_displayed():
-                    return match
-        return None
-
-    def _get_message_container(self):
-        """Return the active conversation container."""
-        return self._wait_for_any_visible(self.MESSAGE_CONTAINER_SELECTORS)
-
-    def _find_message_elements(self):
-        """Return visible message-like elements from the current conversation."""
-        container = self._get_message_container()
-        selectors = (
-            '[data-pre-plain-text]',
-            'div[role="row"]',
-            '[data-testid="msg-container"]',
-        )
-        elements = []
-        seen = set()
-
-        for selector in selectors:
-            for element in container.find_elements(By.CSS_SELECTOR, selector):
-                if not element.is_displayed():
-                    continue
-
-                element_id = element.id
-                if element_id in seen:
-                    continue
-
-                seen.add(element_id)
-                elements.append(element)
-
-        return elements
-
-    def _normalize_message_text(self, text: str) -> str:
-        """Collapse repeated whitespace while preserving message readability."""
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        return " ".join(lines).strip()
-
-    def _extract_text_candidates(self, msg_element):
-        """Collect text candidates from known message text nodes."""
-        candidates = []
-        seen = set()
-
-        for selector in self.MESSAGE_TEXT_FALLBACK_SELECTORS:
-            for node in msg_element.find_elements(By.CSS_SELECTOR, selector):
-                text = self._normalize_message_text(node.text)
-                if not text or text in seen:
-                    continue
-
-                seen.add(text)
-                candidates.append(text)
-
-        return candidates
-
-    def _describe_login_state(self) -> str:
-        """Provide a short page-state summary for login failures."""
-        if self._find_first_visible(self.LOGIN_READY_SELECTORS):
-            return "WhatsApp Web loaded, but the expected chat UI selector changed."
-        if self._find_first_visible(self.LOGIN_QR_SELECTORS):
-            return "WhatsApp Web is waiting for a QR code scan."
-        return "WhatsApp Web did not expose a recognized login or chat-list element."
+    # Sets up the WhatsApp reader — opens Chrome with a saved session so you don't have to scan the QR code every single time.
 
     # ── STEP 1: Login ──────────────────────────────────────────────────────────
+    # Opens WhatsApp Web in Chrome and waits for you to scan the QR code — or skips it if you already logged in before.
     def login(self):
         """Open WhatsApp Web and wait until you are logged in."""
         print("Opening WhatsApp Web...")
@@ -288,6 +202,42 @@ class WhatsAppReader:
         print("Logged in successfully!\n")
 
     # ── STEP 2: Open the Group ─────────────────────────────────────────────────
+    # Types the group name into the WhatsApp search box and clicks on it to open that chat.
+
+    # [sub of STEP 1, 2 & 3] Looks through a list of page elements and returns the first one that is actually visible on screen.
+    def _find_first_visible(self, selectors: Sequence[str]):
+        """Return the first visible element that matches any selector."""
+        for selector in selectors:
+            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+            for element in elements:
+                if element.is_displayed():
+                    return element
+        return None
+
+    # Keeps checking the page until at least one of the listed things shows up, or gives up after a time limit.
+
+    # [sub of STEP 1, 2 & 3] Keeps checking the page until at least one of the listed things shows up, or gives up after a time limit.
+    def _wait_for_any_visible(self, selectors: Sequence[str], timeout: Optional[int] = None):
+        """Wait until any selector resolves to a visible element."""
+        wait = WebDriverWait(self.driver, timeout or DEFAULT_WAIT_TIMEOUT)
+        return wait.until(lambda driver: self._find_first_visible(selectors))
+
+    # Clears whatever is already typed in the search box and types in a new search word.
+
+    # [sub of STEP 1 - login] Checks what the login page looks like right now and returns a helpful message explaining what went wrong.
+    def _describe_login_state(self) -> str:
+        """Provide a short page-state summary for login failures."""
+        if self._find_first_visible(self.LOGIN_READY_SELECTORS):
+            return "WhatsApp Web loaded, but the expected chat UI selector changed."
+        if self._find_first_visible(self.LOGIN_QR_SELECTORS):
+            return "WhatsApp Web is waiting for a QR code scan."
+        return "WhatsApp Web did not expose a recognized login or chat-list element."
+
+    # ── STEP 1: Login ──────────────────────────────────────────────────────────
+    # Opens WhatsApp Web in Chrome and waits for you to scan the QR code — or skips it if you already logged in before.
+
+    # ── STEP 2: Open the Group ─────────────────────────────────────────────────
+    # Types the group name into the WhatsApp search box and clicks on it to open that chat.
     def open_group(self, group_name: str):
         """Search for and open a WhatsApp group by its exact name."""
         print(f"Searching for group: '{group_name}'...")
@@ -307,7 +257,38 @@ class WhatsAppReader:
         print(f"Opened group: '{group_name}'\n")
 
     # ── STEP 3: Read Messages ──────────────────────────────────────────────────
+    # Goes through every visible message in the chat and prints who sent it and what they wrote.
 
+    # [sub of STEP 2 - open_group] Clears whatever is already typed in the search box and types in a new search word.
+    def _replace_search_text(self, element, value: str):
+        """Replace any existing search text in the active WhatsApp search box."""
+        element.send_keys(Keys.CONTROL, "a")
+        element.send_keys(Keys.DELETE)
+        element.send_keys(value)
+
+    # Searches the page for a chat item whose title matches the group name you gave it.
+
+    # [sub of STEP 2 - open_group] Searches the page for a chat item whose title matches the group name you gave it.
+    def _find_chat_result(self, group_name: str):
+        """Return the first clickable chat result that matches the group name."""
+        result_xpaths = (
+            f'//span[@title="{group_name}"]',
+            f'//*[@title="{group_name}"]',
+            f'//span[normalize-space()="{group_name}"]',
+            f'//*[@aria-label="{group_name}"]',
+        )
+
+        for xpath in result_xpaths:
+            matches = self.driver.find_elements(By.XPATH, xpath)
+            for match in matches:
+                if match.is_displayed():
+                    return match
+        return None
+
+    # Finds the big box on the page that holds all the chat messages.
+
+    # ── STEP 3: Read Messages ──────────────────────────────────────────────────
+    # Goes through every visible message in the chat and prints who sent it and what they wrote.
     def read_messages(self):
         """
         Print all visible messages and their senders.
@@ -343,7 +324,44 @@ class WhatsAppReader:
         print(f"\nTotal messages shown: {printed_messages}")
 
     # ── Helper: extract sender name ────────────────────────────────────────────
+    # Reads the hidden label WhatsApp puts on each message bubble to figure out who sent it.
 
+    # [sub of STEP 3 - read_messages] Collects every visible message bubble in the open chat and returns them as a list.
+    def _find_message_elements(self):
+        """Return visible message-like elements from the current conversation."""
+        container = self._get_message_container()
+        selectors = (
+            '[data-pre-plain-text]',
+            'div[role="row"]',
+            '[data-testid="msg-container"]',
+        )
+        elements = []
+        seen = set()
+
+        for selector in selectors:
+            for element in container.find_elements(By.CSS_SELECTOR, selector):
+                if not element.is_displayed():
+                    continue
+
+                element_id = element.id
+                if element_id in seen:
+                    continue
+
+                seen.add(element_id)
+                elements.append(element)
+
+        return elements
+
+    # Cleans up a message by removing extra blank lines and squishing extra spaces into one.
+
+    # [sub of _find_message_elements] Finds the big box on the page that holds all the chat messages.
+    def _get_message_container(self):
+        """Return the active conversation container."""
+        return self._wait_for_any_visible(self.MESSAGE_CONTAINER_SELECTORS)
+
+    # Collects every visible message bubble in the open chat and returns them as a list.
+
+    # [sub of STEP 3 - read_messages] Reads the hidden label WhatsApp puts on each message bubble to figure out who sent it.
     def _parse_sender(self, msg_element) -> str:
         """
         Pull the sender name out of the data-pre-plain-text attribute.
@@ -371,7 +389,9 @@ class WhatsAppReader:
         return "Unknown"
 
     # ── Helper: extract message text ───────────────────────────────────────────
+    # Gets the actual words from a message bubble and throws away anything that looks like junk.
 
+    # [sub of STEP 3 - read_messages] Gets the actual words from a message bubble and throws away anything that looks like junk.
     def _get_text(self, msg_element) -> str:
         """Get the plain text content of a message bubble."""
         candidates = self._extract_text_candidates(msg_element)
@@ -388,15 +408,45 @@ class WhatsAppReader:
         return text
 
     # ── Cleanup ────────────────────────────────────────────────────────────────
+    # Shuts down the Chrome browser when we are completely done reading messages.
 
+   # [sub of _get_text] Tries several different ways to grab the text out of a message bubble so we don't miss anything.
+    def _extract_text_candidates(self, msg_element):
+        """Collect text candidates from known message text nodes."""
+        candidates = []
+        seen = set()
+
+        for selector in self.MESSAGE_TEXT_FALLBACK_SELECTORS:
+            for node in msg_element.find_elements(By.CSS_SELECTOR, selector):
+                text = self._normalize_message_text(node.text)
+                if not text or text in seen:
+                    continue
+
+                seen.add(text)
+                candidates.append(text)
+
+        return candidates
+
+    # Checks what the login page looks like right now and returns a helpful message explaining what went wrong.
+
+    # [sub of _extract_text_candidates] Cleans up a message by removing extra blank lines and squishing extra spaces into one.
+    def _normalize_message_text(self, text: str) -> str:
+        """Collapse repeated whitespace while preserving message readability."""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        return " ".join(lines).strip()
+
+    # Tries several different ways to grab the text out of a message bubble so we don't miss anything.
+
+    # ── CLEANUP ────────────────────────────────────────────────────────────────
+    # Shuts down the Chrome browser when we are completely done reading messages.
     def close(self):
         """Close the Chrome browser."""
         self.driver.quit()
         print("Browser closed.")
 
-
 # ── MAIN ───────────────────────────────────────────────────────────────────────
 
+# The starting point of the whole program — runs login, opens the group, and reads the messages, one step at a time.
 def main():
     reader = WhatsAppReader()
     try:
